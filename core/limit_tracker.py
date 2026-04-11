@@ -199,6 +199,7 @@ class LimitTracker:
                 headers = {
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
                     "anthropic-beta": ANTHROPIC_BETA,
                     "User-Agent": f"claude-code/{CLAUDE_CODE_VERSION}",
                 }
@@ -221,12 +222,19 @@ class LimitTracker:
                         self._save_backoff(retry_after)
                         return None
                     if resp.status not in (200, 201):
-                        logger.warning("Messages API ping returned %d", resp.status)
+                        body = await resp.text()
+                        logger.warning("Messages API ping returned %d: %s", resp.status, body[:500])
                         return None
                     await resp.read()
                     _BACKOFF_FILE.unlink(missing_ok=True)
                     self._consecutive_429 = 0
-                    return parse_usage_headers(resp.headers)
+                    usage = parse_usage_headers(resp.headers)
+                    logger.info(
+                        "Usage: 5h=%.0f%% 7d=%.0f%%",
+                        usage.five_hour_util * 100,
+                        usage.seven_day_util * 100,
+                    )
+                    return usage
         except Exception:
             logger.exception("Failed to poll usage via messages ping")
             return None

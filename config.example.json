@@ -3,5 +3,6 @@
   "poll_interval_sec": 60,
   "thresholds": [70, 85, 95],
   "log_level": "INFO",
-  "terminal": "console"
+  "terminal": "console",
+  "ide_trigger_timeout": 30
 }

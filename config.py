@@ -15,6 +15,7 @@ class Config:
     thresholds: list[int] = field(default_factory=lambda: [70, 85, 95])
     log_level: str = "INFO"
     ide: str = "none"  # "vscode", "cursor", or "none" (plain console)
+    ide_trigger_timeout: int = 30  # seconds to wait for IDE extension to pick up trigger
 
 
 def load_config(config_path: str = "config.json") -> Config:
@@ -41,6 +42,7 @@ def load_config(config_path: str = "config.json") -> Config:
         thresholds=file_config.get("thresholds", [70, 85, 95]),
         log_level=file_config.get("log_level", "INFO"),
         ide=file_config.get("ide", "none"),
+        ide_trigger_timeout=file_config.get("ide_trigger_timeout", 30),
     )
 
 

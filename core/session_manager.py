@@ -98,9 +98,10 @@ class SessionInfo:
 
 
 class SessionManager:
-    def __init__(self, notifier: Notifier, ide: str = "none"):
+    def __init__(self, notifier: Notifier, ide: str = "none", ide_trigger_timeout: int = 30):
         self._notifier = notifier
         self._ide = ide
+        self._ide_trigger_timeout = ide_trigger_timeout
         self._sessions: dict[str, SessionInfo] = {}
 
     def list_sessions(self) -> list[SessionInfo]:
@@ -302,7 +303,8 @@ class SessionManager:
 
         # Wait for extension to pick it up
         picked_up = False
-        for _ in range(10):  # 5 seconds
+        iterations = self._ide_trigger_timeout * 2  # 0.5s per iteration
+        for _ in range(iterations):
             await asyncio.sleep(0.5)
             if ACK_FILE.exists():
                 try:

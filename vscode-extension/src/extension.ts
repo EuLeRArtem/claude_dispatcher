@@ -87,6 +87,16 @@ function writeReadyHeartbeat(): void {
 	}
 }
 
+function isMyWorkspace(cwd: string): boolean {
+	const folders = vscode.workspace.workspaceFolders;
+	if (!folders || folders.length === 0) {
+		return false;
+	}
+	const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+	const target = normalize(cwd);
+	return folders.some(f => normalize(f.uri.fsPath) === target);
+}
+
 function handleTrigger(): void {
 	try {
 		const content = fs.readFileSync(TRIGGER_FILE, 'utf-8');
@@ -95,12 +105,19 @@ function handleTrigger(): void {
 		if (request.timestamp <= lastTimestamp) {
 			return;
 		}
-		lastTimestamp = request.timestamp;
 
 		if (!request.command || !request.cwd) {
 			console.warn('Claude Dispatcher: invalid trigger — missing command or cwd');
+			lastTimestamp = request.timestamp;
 			return;
 		}
+
+		// Only handle triggers targeting this workspace
+		if (!isMyWorkspace(request.cwd)) {
+			return;
+		}
+
+		lastTimestamp = request.timestamp;
 
 		const title = request.title || 'Claude Session';
 

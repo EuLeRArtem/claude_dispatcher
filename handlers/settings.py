@@ -22,6 +22,7 @@ def create_settings_handlers(auth_check):
             f"📁 Директория проектов: <code>{cfg.projects_dir or 'не задана'}</code>\n"
             f"⏱️ Интервал поллинга: {cfg.poll_interval_sec} сек\n"
             f"📊 Пороги: {', '.join(str(t) + '%' for t in cfg.thresholds)}\n"
+            f"🖥️ IDE: {cfg.ide} (таймаут триггера: {cfg.ide_trigger_timeout} сек)\n"
             f"📝 Уровень логов: {cfg.log_level}\n\n"
             "<i>Для изменения отредактируй config.json и перезапусти бота</i>"
         )

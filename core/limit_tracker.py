@@ -221,6 +221,9 @@ class LimitTracker:
                         self._backoff_seconds = retry_after
                         self._save_backoff(retry_after)
                         return None
+                    if resp.status == 401:
+                        logger.warning("Messages API 401 — token may be refreshing, will retry next cycle")
+                        return None
                     if resp.status not in (200, 201):
                         body = await resp.text()
                         logger.warning("Messages API ping returned %d: %s", resp.status, body[:500])

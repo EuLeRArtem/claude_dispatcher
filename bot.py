@@ -9,6 +9,7 @@ from config import load_config, get_claude_credentials_path
 from core.notifier import Notifier
 from core.project_registry import ProjectRegistry
 from core.session_manager import SessionManager
+from core.hook_server import HookServer
 from core.limit_tracker import LimitTracker
 from analytics.collector import UsageCollector
 from analytics.charts import UsageCharts
@@ -69,6 +70,7 @@ def main():
     notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id)
     registry = ProjectRegistry(data_file="data/projects.json")
     session_manager = SessionManager(notifier=notifier, ide=cfg.ide, ide_trigger_timeout=cfg.ide_trigger_timeout)
+    hook_server = HookServer(notifier=notifier, session_manager=session_manager, port=cfg.hook_port)
 
     # Analytics
     collector = UsageCollector(data_dir="data/usage")
@@ -116,10 +118,12 @@ def main():
     # Start limit tracker after app starts
     async def post_init(application: Application):
         limit_tracker.start()
-        logger.info("Bot started. Limit tracker polling every %ds", cfg.poll_interval_sec)
+        await hook_server.start()
+        logger.info("Bot started. Limit tracker polling every %ds, hooks on port %d", cfg.poll_interval_sec, cfg.hook_port)
 
     async def post_shutdown(application: Application):
         limit_tracker.stop()
+        await hook_server.stop()
 
     app.post_init = post_init
     app.post_shutdown = post_shutdown

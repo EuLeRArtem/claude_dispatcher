@@ -1,12 +1,15 @@
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from core.notifier import Notifier
 
@@ -72,8 +75,9 @@ class SessionInfo:
     project_name: str
     mode: str  # "remote" or "normal"
     started_at: datetime
-    process: asyncio.subprocess.Process
+    process: object  # asyncio.subprocess.Process or subprocess.Popen
     url: str | None = None
+    _url_file: str | None = None
 
     def duration_minutes(self) -> int:
         delta = datetime.now(timezone.utc) - self.started_at
@@ -93,13 +97,18 @@ class SessionManager:
 
     async def start_remote(self, project_name: str, project_path: str, prompt: str = "") -> SessionInfo:
         claude = _find_claude()
+        session_id = str(uuid.uuid4())[:8]
+
+        if _IS_WINDOWS:
+            return await self._start_remote_windows(
+                session_id, claude, project_name, project_path, prompt
+            )
+
+        # Unix: pipe stdout to capture URL (no visible terminal needed)
         cmd = [claude, "--remote-control"]
         if prompt:
             cmd.append(prompt)
-
         process = await _create_process(cmd, cwd=project_path)
-
-        session_id = str(uuid.uuid4())[:8]
         info = SessionInfo(
             session_id=session_id,
             project_name=project_name,
@@ -108,11 +117,52 @@ class SessionManager:
             process=process,
         )
         self._sessions[session_id] = info
-
-        # Read stdout in background to find URL
         asyncio.create_task(self._read_remote_output(info))
-        # Monitor process lifecycle
         asyncio.create_task(self._monitor_process(info))
+        return info
+
+    async def _start_remote_windows(
+        self, session_id: str, claude: str,
+        project_name: str, project_path: str, prompt: str,
+    ) -> SessionInfo:
+        """Start remote-control in a visible console window on Windows.
+        Uses PowerShell Tee-Object to show output in console AND write to temp file.
+        Bot polls the temp file for the session URL.
+        """
+        env = _get_env()
+        url_file = Path(tempfile.gettempdir()) / f"claude_rc_{session_id}.txt"
+
+        # Build PowerShell command: run claude, tee output to file
+        claude_args = f'& "{claude}" --remote-control'
+        if prompt:
+            # Escape single quotes in prompt for PowerShell
+            safe_prompt = prompt.replace("'", "''")
+            claude_args += f" '{safe_prompt}'"
+        ps_cmd = f'{claude_args} 2>&1 | Tee-Object -FilePath "{url_file}"'
+
+        logger.info("Remote control: ps_cmd=%s cwd=%s url_file=%s", ps_cmd, project_path, url_file)
+
+        process = subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            cwd=project_path,
+            env=env,
+        )
+
+        info = SessionInfo(
+            session_id=session_id,
+            project_name=project_name,
+            mode="remote",
+            started_at=datetime.now(timezone.utc),
+            process=process,
+            _url_file=str(url_file),
+        )
+        self._sessions[session_id] = info
+
+        # Poll temp file for URL in background
+        asyncio.create_task(self._poll_url_file(info))
+        # Monitor process lifecycle
+        asyncio.create_task(self._monitor_popen(info))
 
         return info
 
@@ -143,15 +193,32 @@ class SessionManager:
         if not info:
             return False
 
-        info.process.terminate()
-        try:
-            await asyncio.wait_for(info.process.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            info.process.kill()
-            await info.process.wait()
+        proc = info.process
+        if isinstance(proc, subprocess.Popen):
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        else:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+
+        # Cleanup temp file
+        if info._url_file:
+            try:
+                os.unlink(info._url_file)
+            except OSError:
+                pass
 
         self._sessions.pop(session_id, None)
         return True
+
+    # --- Remote control (Unix): pipe stdout to capture URL ---
 
     async def _read_remote_output(self, info: SessionInfo) -> None:
         collected = ""
@@ -176,6 +243,62 @@ class SessionManager:
                     break
         except Exception:
             logger.exception("Error reading remote output for %s", info.project_name)
+
+    # --- Remote control (Windows): visible console + poll temp file ---
+
+    async def _poll_url_file(self, info: SessionInfo) -> None:
+        """Poll the temp file written by Tee-Object for the session URL."""
+        url_file = Path(info._url_file)
+        try:
+            for _ in range(60):  # Try for 60 seconds
+                await asyncio.sleep(1)
+                if not url_file.exists():
+                    continue
+                try:
+                    content = url_file.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                url = parse_remote_url(content)
+                if url:
+                    info.url = url
+                    await self._notifier.session_started(
+                        project=info.project_name, mode="remote", url=url
+                    )
+                    return
+            # Timeout — notify without URL
+            await self._notifier.session_started(
+                project=info.project_name, mode="remote"
+            )
+        except Exception:
+            logger.exception("Error polling URL file for %s", info.project_name)
+
+    async def _monitor_popen(self, info: SessionInfo) -> None:
+        """Monitor a subprocess.Popen process (used for Windows remote-control)."""
+        proc = info.process
+        while proc.poll() is None:
+            await asyncio.sleep(2)
+
+        returncode = proc.returncode
+        duration = info.duration_minutes()
+        self._sessions.pop(info.session_id, None)
+
+        # Cleanup temp file
+        if info._url_file:
+            try:
+                os.unlink(info._url_file)
+            except OSError:
+                pass
+
+        if returncode == 0:
+            await self._notifier.session_finished(
+                project=info.project_name, duration_min=duration
+            )
+        else:
+            await self._notifier.session_error(
+                project=info.project_name, error=f"exit code {returncode}"
+            )
+
+    # --- Normal mode: pipe stdout, no visible window ---
 
     async def _monitor_process(self, info: SessionInfo) -> None:
         returncode = await info.process.wait()

@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import re
-import shlex
 import shutil
+import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -28,8 +28,8 @@ def _find_claude() -> str:
 async def _create_process(cmd: list[str], cwd: str) -> asyncio.subprocess.Process:
     """Create subprocess, handling Windows .cmd files."""
     if _IS_WINDOWS:
-        # On Windows, .cmd files need shell=True
-        shell_cmd = " ".join(cmd)
+        # On Windows, .cmd files need shell=True; use list2cmdline for proper quoting
+        shell_cmd = subprocess.list2cmdline(cmd)
         return await asyncio.create_subprocess_shell(
             shell_cmd,
             stdout=asyncio.subprocess.PIPE,

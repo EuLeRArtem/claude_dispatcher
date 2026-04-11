@@ -67,3 +67,37 @@ async def test_limit_warning(notifier, bot):
     call_text = bot.send_message.call_args[1]["text"]
     assert "70" in call_text
     assert "42" in call_text
+
+
+@pytest.mark.asyncio
+async def test_permission_needed(notifier, bot):
+    await notifier.permission_needed(
+        project="myproject",
+        url="https://claude.ai/code/session_abc",
+        message="Claude needs permission to use Bash",
+    )
+    bot.send_message.assert_called_once()
+    text = bot.send_message.call_args.kwargs["text"]
+    assert "myproject" in text
+    assert "session_abc" in text
+
+
+@pytest.mark.asyncio
+async def test_permission_needed_no_url(notifier, bot):
+    await notifier.permission_needed(project="proj", url=None, message="needs perm")
+    text = bot.send_message.call_args.kwargs["text"]
+    assert "proj" in text
+
+
+@pytest.mark.asyncio
+async def test_agent_idle(notifier, bot):
+    await notifier.agent_idle(project="proj", url="https://claude.ai/code/session_x")
+    text = bot.send_message.call_args.kwargs["text"]
+    assert "proj" in text
+
+
+@pytest.mark.asyncio
+async def test_agent_stopped(notifier, bot):
+    await notifier.agent_stopped(project="proj", error="rate_limit", details="retry 60s")
+    text = bot.send_message.call_args.kwargs["text"]
+    assert "rate_limit" in text

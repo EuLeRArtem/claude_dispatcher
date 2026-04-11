@@ -48,3 +48,19 @@ class Notifier:
         await self.send(
             f"{icon} {period} лимит {percent}% — reset через {reset_minutes} мин"
         )
+
+    async def permission_needed(
+        self, project: str, url: str | None, message: str
+    ) -> None:
+        link = f"\n📎 {url}" if url else ""
+        await self.send(f"⚠️ <b>{project}</b>: ждёт разрешения\n{message}{link}")
+
+    async def agent_idle(self, project: str, url: str | None = None) -> None:
+        link = f"\n📎 {url}" if url else ""
+        await self.send(f"💤 <b>{project}</b>: агент завершил, ждёт ввода{link}")
+
+    async def agent_stopped(
+        self, project: str, error: str, details: str = ""
+    ) -> None:
+        detail_text = f"\n<pre>{details[:300]}</pre>" if details else ""
+        await self.send(f"⛔ <b>{project}</b>: {error}{detail_text}")

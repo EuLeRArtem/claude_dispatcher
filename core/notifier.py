@@ -40,7 +40,7 @@ class Notifier:
             text = f"🚀 <b>{project}</b>: remote-control запущен\n💻 URL в окне терминала"
         else:
             text = f"🚀 <b>{project}</b>: задача запущена"
-        await self.send(text)
+        await self.send(text, reply_markup=_session_kb(url))
 
     async def session_finished(self, project: str, duration_min: int) -> None:
         await self.send(
@@ -55,7 +55,10 @@ class Notifier:
         )
 
     async def rate_limit(self, project: str) -> None:
-        await self.send(f"⏸️ <b>{project}</b>: rate limit, ожидание")
+        await self.send(
+            f"⏸️ <b>{project}</b>: rate limit, ожидание",
+            reply_markup=_MENU_KB,
+        )
 
     async def limit_warning(
         self, period: str, percent: int, reset_minutes: int
@@ -63,7 +66,8 @@ class Notifier:
         icons = {70: "⚠️", 85: "⛔", 95: "🔴"}
         icon = icons.get(percent, "⚠️")
         await self.send(
-            f"{icon} {period} лимит {percent}% — reset через {reset_minutes} мин"
+            f"{icon} {period} лимит {percent}% — reset через {reset_minutes} мин",
+            reply_markup=_MENU_KB,
         )
 
     async def permission_needed(

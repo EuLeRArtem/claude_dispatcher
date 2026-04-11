@@ -60,8 +60,10 @@ class HookServer:
         if event == "Stop":
             last_msg = data.get("last_assistant_message", "")
             truncated = last_msg[:300] + "..." if len(last_msg) > 300 else last_msg
+            from core.notifier import _MENU_KB
             await self._notifier.send(
-                f"✅ <b>{project}</b>: задача завершена\n<pre>{truncated}</pre>"
+                f"✅ <b>{project}</b>: задача завершена\n<pre>{truncated}</pre>",
+                reply_markup=_MENU_KB,
             )
 
         elif event == "Notification":

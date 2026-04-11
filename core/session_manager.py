@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import re
+import shlex
+import shutil
+import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +13,35 @@ from core.notifier import Notifier
 logger = logging.getLogger(__name__)
 
 _REMOTE_URL_RE = re.compile(r"(https://claude\.ai/code/session_\S+)")
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def _find_claude() -> str:
+    """Find claude executable. On Windows, prefer .cmd wrapper."""
+    if _IS_WINDOWS:
+        cmd_path = shutil.which("claude.cmd") or shutil.which("claude")
+        if cmd_path:
+            return cmd_path
+    return shutil.which("claude") or "claude"
+
+
+async def _create_process(cmd: list[str], cwd: str) -> asyncio.subprocess.Process:
+    """Create subprocess, handling Windows .cmd files."""
+    if _IS_WINDOWS:
+        # On Windows, .cmd files need shell=True
+        shell_cmd = " ".join(cmd)
+        return await asyncio.create_subprocess_shell(
+            shell_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+        )
+    return await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
+    )
 
 
 def parse_remote_url(text: str) -> str | None:
@@ -43,16 +75,12 @@ class SessionManager:
         return self._sessions.get(session_id)
 
     async def start_remote(self, project_name: str, project_path: str, prompt: str = "") -> SessionInfo:
-        cmd = ["claude", "--remote-control"]
+        claude = _find_claude()
+        cmd = [claude, "--remote-control"]
         if prompt:
             cmd.append(prompt)
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=project_path,
-        )
+        process = await _create_process(cmd, cwd=project_path)
 
         session_id = str(uuid.uuid4())[:8]
         info = SessionInfo(
@@ -72,14 +100,10 @@ class SessionManager:
         return info
 
     async def start_normal(self, project_name: str, project_path: str, prompt: str) -> SessionInfo:
-        cmd = ["claude", "-p", "--output-format", "json", prompt]
+        claude = _find_claude()
+        cmd = [claude, "-p", "--output-format", "json", prompt]
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=project_path,
-        )
+        process = await _create_process(cmd, cwd=project_path)
 
         session_id = str(uuid.uuid4())[:8]
         info = SessionInfo(

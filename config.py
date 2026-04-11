@@ -16,6 +16,7 @@ class Config:
     log_level: str = "INFO"
     ide: str = "none"  # "vscode", "cursor", or "none" (plain console)
     ide_trigger_timeout: int = 30  # seconds to wait for IDE extension to pick up trigger
+    hook_port: int = 9384
 
 
 def load_config(config_path: str = "config.json") -> Config:
@@ -43,6 +44,7 @@ def load_config(config_path: str = "config.json") -> Config:
         log_level=file_config.get("log_level", "INFO"),
         ide=file_config.get("ide", "none"),
         ide_trigger_timeout=file_config.get("ide_trigger_timeout", 30),
+        hook_port=file_config.get("hook_port", 9384),
     )
 
 

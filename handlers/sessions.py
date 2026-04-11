@@ -149,16 +149,15 @@ def create_session_handlers(
         mode = query.data.replace(CB_SESSION_MODE, "")
         context.user_data["session_mode"] = mode
 
-        await query.edit_message_text(
-            "Введи промпт (или /skip для пустой сессии):"
-        )
+        await query.edit_message_text("Введи промпт:")
         return ENTER_PROMPT
 
     @auth_check
     async def wizard_enter_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        prompt = update.message.text
-        if prompt == "/skip":
-            prompt = ""
+        prompt = update.message.text.strip()
+        if not prompt:
+            await update.message.reply_text("⚠️ Промпт не может быть пустым")
+            return ENTER_PROMPT
 
         project_name = context.user_data.get("session_project")
         mode = context.user_data.get("session_mode")
@@ -173,9 +172,6 @@ def create_session_handlers(
         if mode == "remote":
             await session_manager.start_remote(project_name, project["path"], prompt)
         else:
-            if not prompt:
-                await update.message.reply_text("⚠️ Для обычного режима нужен промпт")
-                return ConversationHandler.END
             await session_manager.start_normal(project_name, project["path"], prompt)
 
         # Show main menu after session creation
@@ -200,7 +196,6 @@ def create_session_handlers(
             ],
             ENTER_PROMPT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, wizard_enter_prompt),
-                MessageHandler(filters.Regex(r"^/skip$"), wizard_enter_prompt),
             ],
         },
         fallbacks=[

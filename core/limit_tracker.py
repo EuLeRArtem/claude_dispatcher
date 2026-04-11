@@ -1,6 +1,9 @@
 import asyncio
 import json
 import logging
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +16,56 @@ from core.notifier import Notifier
 logger = logging.getLogger(__name__)
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+_BACKOFF_FILE = Path("data/.usage_backoff")
+
+# Fallbacks if auto-detection fails
+_DEFAULT_BETA = "oauth-2025-04-20"
+_DEFAULT_VERSION = "2.1.87"
+
+
+def _detect_claude_code_info() -> tuple[str, str]:
+    """Extract anthropic-beta header and version from installed Claude Code.
+
+    Returns (anthropic_beta, version) with fallbacks if detection fails.
+    """
+    beta = _DEFAULT_BETA
+    version = _DEFAULT_VERSION
+
+    try:
+        # Find Claude Code install dir via npm
+        result = subprocess.run(
+            ["npm", "root", "-g"], capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return beta, version
+
+        pkg_dir = Path(result.stdout.strip()) / "@anthropic-ai" / "claude-code"
+        if not pkg_dir.exists():
+            return beta, version
+
+        # Version from package.json
+        pkg_json = pkg_dir / "package.json"
+        if pkg_json.exists():
+            version = json.loads(pkg_json.read_text(encoding="utf-8")).get("version", version)
+
+        # anthropic-beta from cli.js (pattern: SX="oauth-YYYY-MM-DD")
+        cli_js = pkg_dir / "cli.js"
+        if cli_js.exists():
+            # Read first 500KB — the constant is near the top of the bundled file
+            with open(cli_js, "r", encoding="utf-8") as f:
+                chunk = f.read(512_000)
+            m = re.search(r'SX="(oauth-\d{4}-\d{2}-\d{2})"', chunk)
+            if m:
+                beta = m.group(1)
+
+    except Exception:
+        logger.debug("Failed to detect Claude Code info, using defaults", exc_info=True)
+
+    logger.info("Claude Code: version=%s, anthropic-beta=%s", version, beta)
+    return beta, version
+
+
+ANTHROPIC_BETA, CLAUDE_CODE_VERSION = _detect_claude_code_info()
 
 
 @dataclass
@@ -26,15 +79,15 @@ class UsageData:
 
 
 def parse_usage_response(data: dict) -> UsageData:
-    five_hour = data.get("five_hour", {})
-    seven_day = data.get("seven_day", {})
-    seven_day_sonnet = data.get("seven_day_sonnet", {})
+    five_hour = data.get("five_hour") or {}
+    seven_day = data.get("seven_day") or {}
+    seven_day_sonnet = data.get("seven_day_sonnet") or {}
     return UsageData(
-        five_hour_util=five_hour.get("utilization", 0.0),
+        five_hour_util=five_hour.get("utilization", 0.0) / 100,
         five_hour_resets_at=five_hour.get("resets_at", ""),
-        seven_day_util=seven_day.get("utilization", 0.0),
+        seven_day_util=seven_day.get("utilization", 0.0) / 100,
         seven_day_resets_at=seven_day.get("resets_at", ""),
-        seven_day_sonnet_util=seven_day_sonnet.get("utilization", 0.0),
+        seven_day_sonnet_util=seven_day_sonnet.get("utilization", 0.0) / 100,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -56,8 +109,34 @@ class LimitTracker:
         self._fired: dict[str, set[int]] = {}
         self._running = False
         self._task: asyncio.Task | None = None
-        self._backoff_seconds: int = 0
+        self._backoff_seconds: int = self._load_backoff()
         self.latest: UsageData | None = None
+
+    @staticmethod
+    def _load_backoff() -> int:
+        """Load remaining backoff from file (survives restarts)."""
+        try:
+            if _BACKOFF_FILE.exists():
+                data = json.loads(_BACKOFF_FILE.read_text())
+                resume_at = data.get("resume_at", 0)
+                remaining = int(resume_at - datetime.now(timezone.utc).timestamp())
+                if remaining > 0:
+                    logger.info("Resuming rate-limit backoff: %ds remaining", remaining)
+                    return remaining
+                _BACKOFF_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return 0
+
+    @staticmethod
+    def _save_backoff(seconds: int) -> None:
+        """Persist backoff so restarts don't reset it."""
+        try:
+            _BACKOFF_FILE.parent.mkdir(parents=True, exist_ok=True)
+            resume_at = datetime.now(timezone.utc).timestamp() + seconds
+            _BACKOFF_FILE.write_text(json.dumps({"resume_at": resume_at}))
+        except Exception:
+            pass
 
     def _get_token(self) -> str | None:
         try:
@@ -95,17 +174,21 @@ class LimitTracker:
                 headers = {
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
+                    "anthropic-beta": ANTHROPIC_BETA,
+                    "User-Agent": f"claude-code/{CLAUDE_CODE_VERSION}",
                 }
                 async with session.get(USAGE_URL, headers=headers) as resp:
                     if resp.status == 429:
                         retry_after = int(resp.headers.get("retry-after", 60))
                         logger.info("Usage API rate limited, retry in %ds", retry_after)
                         self._backoff_seconds = retry_after
+                        self._save_backoff(retry_after)
                         return None
                     if resp.status != 200:
                         logger.warning("Usage API returned %d", resp.status)
                         return None
                     data = await resp.json()
+                    _BACKOFF_FILE.unlink(missing_ok=True)
                     return parse_usage_response(data)
         except Exception:
             logger.exception("Failed to poll usage API")

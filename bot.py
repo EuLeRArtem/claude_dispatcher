@@ -68,7 +68,7 @@ def main():
     # Core components
     notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id)
     registry = ProjectRegistry(data_file="data/projects.json")
-    session_manager = SessionManager(notifier=notifier, terminal_mode=cfg.terminal)
+    session_manager = SessionManager(notifier=notifier, ide=cfg.ide)
 
     # Analytics
     collector = UsageCollector(data_dir="data/usage")
@@ -92,11 +92,14 @@ def main():
     back_handler = CallbackQueryHandler(auth_check(main_menu), pattern=f"^{CB_BACK_MAIN}$")
 
     app.add_handler(start_handler)
-    app.add_handler(back_handler)
 
-    # Session handlers (ConversationHandler must be added before simple CallbackQueryHandlers)
-    for handler in create_session_handlers(registry, session_manager, auth_check):
+    # Session handlers (ConversationHandler must be added BEFORE back_handler
+    # so the wizard's fallback properly clears conversation state on "back")
+    for handler in create_session_handlers(registry, session_manager, auth_check, main_menu):
         app.add_handler(handler)
+
+    # back_handler AFTER ConversationHandler — so wizard fallback gets priority
+    app.add_handler(back_handler)
 
     # Project handlers
     for handler in create_project_handlers(registry, auth_check):

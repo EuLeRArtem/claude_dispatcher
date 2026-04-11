@@ -23,6 +23,7 @@ CB_NEW_SESSION = "new_session"
 CB_SESSION_PROJECT = "sess_proj:"
 CB_SESSION_MODE = "sess_mode:"
 CB_SESSION_KILL = "sess_kill:"
+CB_SESSION_BACK_PROJ = "sess_back_proj"
 CB_BACK_MAIN = "main_menu"
 
 
@@ -30,6 +31,7 @@ def create_session_handlers(
     registry: ProjectRegistry,
     session_manager: SessionManager,
     auth_check,
+    main_menu_callback=None,
 ):
 
     @auth_check
@@ -108,16 +110,13 @@ def create_session_handlers(
         query = update.callback_query
         await query.answer()
 
-        if query.data == CB_BACK_MAIN:
-            return ConversationHandler.END
-
         project_name = query.data.replace(CB_SESSION_PROJECT, "")
         context.user_data["session_project"] = project_name
 
         keyboard = [
             [InlineKeyboardButton("🖥️ Remote Control", callback_data=f"{CB_SESSION_MODE}remote")],
             [InlineKeyboardButton("▶️ Обычная", callback_data=f"{CB_SESSION_MODE}normal")],
-            [InlineKeyboardButton("🔙 Отмена", callback_data=CB_BACK_MAIN)],
+            [InlineKeyboardButton("🔙 Назад", callback_data=CB_SESSION_BACK_PROJ)],
         ]
         await query.edit_message_text(
             f"Проект: <b>{project_name}</b>\nРежим?",
@@ -127,12 +126,25 @@ def create_session_handlers(
         return SELECT_MODE
 
     @auth_check
-    async def wizard_select_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def wizard_back_to_projects(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
 
-        if query.data == CB_BACK_MAIN:
-            return ConversationHandler.END
+        projects = registry.list()
+        keyboard = [
+            [InlineKeyboardButton(p["name"], callback_data=f"{CB_SESSION_PROJECT}{p['name']}")]
+            for p in projects
+        ]
+        keyboard.append([InlineKeyboardButton("🔙 Отмена", callback_data=CB_BACK_MAIN)])
+        await query.edit_message_text(
+            "Какой проект?", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return SELECT_PROJECT
+
+    @auth_check
+    async def wizard_select_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
 
         mode = query.data.replace(CB_SESSION_MODE, "")
         context.user_data["session_mode"] = mode
@@ -166,17 +178,26 @@ def create_session_handlers(
                 return ConversationHandler.END
             await session_manager.start_normal(project_name, project["path"], prompt)
 
+        # Show main menu after session creation
+        if main_menu_callback:
+            await main_menu_callback(update, context)
+
         return ConversationHandler.END
 
     @auth_check
     async def wizard_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if main_menu_callback:
+            await main_menu_callback(update, context)
         return ConversationHandler.END
 
     wizard_conversation = ConversationHandler(
         entry_points=[CallbackQueryHandler(wizard_start, pattern=f"^{CB_NEW_SESSION}$")],
         states={
-            SELECT_PROJECT: [CallbackQueryHandler(wizard_select_project)],
-            SELECT_MODE: [CallbackQueryHandler(wizard_select_mode)],
+            SELECT_PROJECT: [CallbackQueryHandler(wizard_select_project, pattern=f"^{CB_SESSION_PROJECT}")],
+            SELECT_MODE: [
+                CallbackQueryHandler(wizard_back_to_projects, pattern=f"^{CB_SESSION_BACK_PROJ}$"),
+                CallbackQueryHandler(wizard_select_mode, pattern=f"^{CB_SESSION_MODE}"),
+            ],
             ENTER_PROMPT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, wizard_enter_prompt),
                 MessageHandler(filters.Regex(r"^/skip$"), wizard_enter_prompt),
@@ -184,6 +205,7 @@ def create_session_handlers(
         },
         fallbacks=[
             CallbackQueryHandler(wizard_cancel, pattern=f"^{CB_BACK_MAIN}$"),
+            CallbackQueryHandler(wizard_cancel),  # catch-all: any unexpected callback cancels wizard
         ],
         per_message=False,
     )

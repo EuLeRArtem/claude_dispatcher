@@ -19,6 +19,7 @@ const TRIGGER_DIR = path.join(os.homedir(), '.claude-dispatcher');
 const TRIGGER_FILE = path.join(TRIGGER_DIR, 'terminal.json');
 const KILL_FILE = path.join(TRIGGER_DIR, 'terminal-kill.json');
 const ACK_FILE = path.join(TRIGGER_DIR, 'terminal.ack');
+const READY_FILE = path.join(TRIGGER_DIR, 'ide-ready.ack');
 
 let lastTimestamp = 0;
 let lastKillTimestamp = 0;
@@ -27,6 +28,11 @@ let lastKillTimestamp = 0;
 const managedTerminals = new Map<string, vscode.Terminal>();
 
 export function activate(context: vscode.ExtensionContext) {
+	// Запоминаем время активации — игнорируем trigger-файлы старше этого момента
+	const activationTime = Date.now();
+	lastTimestamp = activationTime;
+	lastKillTimestamp = activationTime;
+
 	// Ensure trigger directory exists
 	if (!fs.existsSync(TRIGGER_DIR)) {
 		fs.mkdirSync(TRIGGER_DIR, { recursive: true });
@@ -56,12 +62,29 @@ export function activate(context: vscode.ExtensionContext) {
 		closeListener,
 	);
 
-	// Check on activation in case file was written before extension started
+	// Write readiness heartbeat so the bot knows the extension is alive
+	writeReadyHeartbeat();
+	const heartbeatInterval = setInterval(() => writeReadyHeartbeat(), 10_000);
+	context.subscriptions.push({ dispose: () => clearInterval(heartbeatInterval) });
+
+	// Проверяем trigger-файл на случай, если он был записан прямо перед активацией
+	// (handleTrigger отбросит его, если timestamp <= activationTime)
 	if (fs.existsSync(TRIGGER_FILE)) {
 		handleTrigger();
 	}
 
 	console.log('Claude Dispatcher Terminal extension activated');
+}
+
+function writeReadyHeartbeat(): void {
+	try {
+		if (!fs.existsSync(TRIGGER_DIR)) {
+			fs.mkdirSync(TRIGGER_DIR, { recursive: true });
+		}
+		fs.writeFileSync(READY_FILE, String(Date.now()));
+	} catch {
+		// Ignore write errors
+	}
 }
 
 function handleTrigger(): void {

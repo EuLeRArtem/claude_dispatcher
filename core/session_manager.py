@@ -41,8 +41,10 @@ def _get_env() -> dict[str, str]:
 async def _create_process(cmd: list[str], cwd: str) -> asyncio.subprocess.Process:
     """Create subprocess, handling Windows .cmd files."""
     env = _get_env()
+    logger.info("Starting process: cmd=%s cwd=%s", cmd, cwd)
     if _IS_WINDOWS:
         shell_cmd = subprocess.list2cmdline(cmd)
+        logger.info("Shell command: %s", shell_cmd)
         return await asyncio.create_subprocess_shell(
             shell_cmd,
             stdout=asyncio.subprocess.PIPE,

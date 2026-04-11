@@ -25,22 +25,36 @@ def _find_claude() -> str:
     return shutil.which("claude") or "claude"
 
 
+def _get_env() -> dict[str, str]:
+    """Get environment with Windows-specific overrides for claude CLI."""
+    import os
+    env = os.environ.copy()
+    if _IS_WINDOWS and "CLAUDE_CODE_GIT_BASH_PATH" not in env:
+        # claude -p on Windows requires git-bash
+        git_bash = shutil.which("bash", path=r"C:\Program Files\Git\bin") or \
+                   shutil.which("bash", path=r"C:\Users\patri\AppData\Local\Programs\Git\bin")
+        if git_bash:
+            env["CLAUDE_CODE_GIT_BASH_PATH"] = git_bash
+    return env
+
+
 async def _create_process(cmd: list[str], cwd: str) -> asyncio.subprocess.Process:
     """Create subprocess, handling Windows .cmd files."""
+    env = _get_env()
     if _IS_WINDOWS:
-        # On Windows, .cmd files need shell=True; use list2cmdline for proper quoting
-        shell_cmd = subprocess.list2cmdline(cmd)
-        return await asyncio.create_subprocess_shell(
-            shell_cmd,
+        return await asyncio.create_subprocess_exec(
+            "cmd", "/c", *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=env,
         )
     return await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        env=env,
     )
 
 

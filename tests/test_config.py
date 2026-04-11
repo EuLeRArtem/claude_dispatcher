@@ -53,7 +53,8 @@ def test_load_config_missing_token(tmp_path):
     config_path.write_text("{}")
 
     env = {"TELEGRAM_USER_ID": "1"}
-    with patch.dict(os.environ, env, clear=False):
+    with patch.dict(os.environ, env, clear=False), \
+         patch("config.load_dotenv"):  # Don't load .env file
         os.environ.pop("TELEGRAM_BOT_TOKEN", None)
         from config import load_config
         with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):

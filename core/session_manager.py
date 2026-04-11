@@ -126,24 +126,19 @@ class SessionManager:
         project_name: str, project_path: str, prompt: str,
     ) -> SessionInfo:
         """Start remote-control in a visible console window on Windows.
-        Uses PowerShell Tee-Object to show output in console AND write to temp file.
-        Bot polls the temp file for the session URL.
+        Claude writes directly to console (not stdout), so we can't pipe the URL.
+        Instead, we open a visible terminal and notify the user.
         """
         env = _get_env()
-        url_file = Path(tempfile.gettempdir()) / f"claude_rc_{session_id}.txt"
 
-        # Build PowerShell command: run claude, tee output to file
-        claude_args = f'& "{claude}" --remote-control'
+        cmd = [claude, "--remote-control"]
         if prompt:
-            # Escape single quotes in prompt for PowerShell
-            safe_prompt = prompt.replace("'", "''")
-            claude_args += f" '{safe_prompt}'"
-        ps_cmd = f'{claude_args} 2>&1 | Tee-Object -FilePath "{url_file}"'
+            cmd.append(prompt)
 
-        logger.info("Remote control: ps_cmd=%s cwd=%s url_file=%s", ps_cmd, project_path, url_file)
+        logger.info("Remote control (visible console): cmd=%s cwd=%s", cmd, project_path)
 
         process = subprocess.Popen(
-            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            cmd,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
             cwd=project_path,
             env=env,
@@ -155,12 +150,11 @@ class SessionManager:
             mode="remote",
             started_at=datetime.now(timezone.utc),
             process=process,
-            _url_file=str(url_file),
         )
         self._sessions[session_id] = info
 
-        # Poll temp file for URL in background
-        asyncio.create_task(self._poll_url_file(info))
+        # Notify — URL is visible in the terminal window
+        await self._notifier.session_started(project=project_name, mode="remote")
         # Monitor process lifecycle
         asyncio.create_task(self._monitor_popen(info))
 

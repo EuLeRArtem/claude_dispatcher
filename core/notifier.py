@@ -23,6 +23,8 @@ class Notifier:
     ) -> None:
         if mode == "remote" and url:
             text = f"🚀 <b>{project}</b>: сессия запущена\n📎 {url}"
+        elif mode == "remote":
+            text = f"🚀 <b>{project}</b>: remote-control запущен\n💻 URL в окне терминала"
         else:
             text = f"🚀 <b>{project}</b>: задача запущена"
         await self.send(text)

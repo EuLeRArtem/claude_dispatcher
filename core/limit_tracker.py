@@ -56,6 +56,7 @@ class LimitTracker:
         self._fired: dict[str, set[int]] = {}
         self._running = False
         self._task: asyncio.Task | None = None
+        self._backoff_seconds: int = 0
         self.latest: UsageData | None = None
 
     def _get_token(self) -> str | None:
@@ -96,6 +97,11 @@ class LimitTracker:
                     "Content-Type": "application/json",
                 }
                 async with session.get(USAGE_URL, headers=headers) as resp:
+                    if resp.status == 429:
+                        retry_after = int(resp.headers.get("retry-after", 60))
+                        logger.info("Usage API rate limited, retry in %ds", retry_after)
+                        self._backoff_seconds = retry_after
+                        return None
                     if resp.status != 200:
                         logger.warning("Usage API returned %d", resp.status)
                         return None
@@ -126,6 +132,10 @@ class LimitTracker:
 
     async def _poll_loop(self) -> None:
         while self._running:
+            if self._backoff_seconds > 0:
+                await asyncio.sleep(self._backoff_seconds)
+                self._backoff_seconds = 0
+                continue
             usage = await self._poll_once()
             if usage:
                 self.latest = usage

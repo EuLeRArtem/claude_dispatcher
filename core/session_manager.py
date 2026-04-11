@@ -78,6 +78,7 @@ class SessionInfo:
     process: object  # asyncio.subprocess.Process or subprocess.Popen
     url: str | None = None
     _url_file: str | None = None
+    _killed: bool = False
 
     def duration_minutes(self) -> int:
         delta = datetime.now(timezone.utc) - self.started_at
@@ -187,6 +188,7 @@ class SessionManager:
         if not info:
             return False
 
+        info._killed = True
         proc = info.process
         if isinstance(proc, subprocess.Popen):
             # On Windows, terminate() only kills the parent — use taskkill /T to kill the tree
@@ -282,24 +284,19 @@ class SessionManager:
         while proc.poll() is None:
             await asyncio.sleep(2)
 
-        returncode = proc.returncode
         duration = info.duration_minutes()
         self._sessions.pop(info.session_id, None)
 
-        # Cleanup temp file
-        if info._url_file:
-            try:
-                os.unlink(info._url_file)
-            except OSError:
-                pass
+        if info._killed:
+            return  # Already handled by kill_session
 
-        if returncode == 0:
+        if proc.returncode == 0:
             await self._notifier.session_finished(
                 project=info.project_name, duration_min=duration
             )
         else:
             await self._notifier.session_error(
-                project=info.project_name, error=f"exit code {returncode}"
+                project=info.project_name, error=f"exit code {proc.returncode}"
             )
 
     # --- Normal mode: pipe stdout, no visible window ---
@@ -308,6 +305,9 @@ class SessionManager:
         returncode = await info.process.wait()
         duration = info.duration_minutes()
         self._sessions.pop(info.session_id, None)
+
+        if info._killed:
+            return
 
         if returncode == 0:
             await self._notifier.session_finished(

@@ -189,7 +189,17 @@ class SessionManager:
 
         proc = info.process
         if isinstance(proc, subprocess.Popen):
-            proc.terminate()
+            # On Windows, terminate() only kills the parent — use taskkill /T to kill the tree
+            if _IS_WINDOWS:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        capture_output=True, timeout=10,
+                    )
+                except Exception:
+                    proc.kill()
+            else:
+                proc.terminate()
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:

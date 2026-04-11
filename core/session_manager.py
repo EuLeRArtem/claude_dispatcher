@@ -85,9 +85,15 @@ class SessionInfo:
         return int(delta.total_seconds() / 60)
 
 
+TRIGGER_DIR = Path.home() / ".claude-dispatcher"
+TRIGGER_FILE = TRIGGER_DIR / "terminal.json"
+ACK_FILE = TRIGGER_DIR / "terminal.ack"
+
+
 class SessionManager:
-    def __init__(self, notifier: Notifier):
+    def __init__(self, notifier: Notifier, terminal_mode: str = "console"):
         self._notifier = notifier
+        self._terminal_mode = terminal_mode
         self._sessions: dict[str, SessionInfo] = {}
 
     def list_sessions(self) -> list[SessionInfo]:
@@ -126,17 +132,26 @@ class SessionManager:
         self, session_id: str, claude: str,
         project_name: str, project_path: str, prompt: str,
     ) -> SessionInfo:
-        """Start remote-control in a visible console window on Windows.
-        Claude writes directly to console (not stdout), so we can't pipe the URL.
-        Instead, we open a visible terminal and notify the user.
-        """
-        env = _get_env()
+        """Start remote-control on Windows — either in VS Code terminal or console window."""
+        if self._terminal_mode == "vscode":
+            return await self._start_remote_vscode(
+                session_id, claude, project_name, project_path, prompt
+            )
+        return await self._start_remote_console(
+            session_id, claude, project_name, project_path, prompt
+        )
 
+    async def _start_remote_console(
+        self, session_id: str, claude: str,
+        project_name: str, project_path: str, prompt: str,
+    ) -> SessionInfo:
+        """Start remote-control in a visible console window."""
+        env = _get_env()
         cmd = [claude, "--remote-control"]
         if prompt:
             cmd.append(prompt)
 
-        logger.info("Remote control (visible console): cmd=%s cwd=%s", cmd, project_path)
+        logger.info("Remote control (console): cmd=%s cwd=%s", cmd, project_path)
 
         process = subprocess.Popen(
             cmd,
@@ -154,11 +169,64 @@ class SessionManager:
         )
         self._sessions[session_id] = info
 
-        # Notify — URL is visible in the terminal window
         await self._notifier.session_started(project=project_name, mode="remote")
-        # Monitor process lifecycle
         asyncio.create_task(self._monitor_popen(info))
+        return info
 
+    async def _start_remote_vscode(
+        self, session_id: str, claude: str,
+        project_name: str, project_path: str, prompt: str,
+    ) -> SessionInfo:
+        """Start remote-control via VS Code integrated terminal.
+        Writes trigger file → VS Code extension creates the terminal.
+        """
+        cmd_str = claude + " --remote-control"
+        if prompt:
+            cmd_str += f' "{prompt}"'
+
+        # Write trigger file
+        TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
+        trigger = {
+            "cwd": project_path,
+            "command": cmd_str,
+            "title": f"Claude: {project_name}",
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        import json
+        TRIGGER_FILE.write_text(json.dumps(trigger), encoding="utf-8")
+
+        logger.info("Remote control (vscode): trigger=%s", trigger)
+
+        # Wait for VS Code extension to pick it up (ack file)
+        picked_up = False
+        for _ in range(10):  # 5 seconds
+            await asyncio.sleep(0.5)
+            if ACK_FILE.exists():
+                try:
+                    ack_ts = ACK_FILE.read_text().strip()
+                    if ack_ts == str(trigger["timestamp"]):
+                        picked_up = True
+                        break
+                except OSError:
+                    pass
+
+        if not picked_up:
+            logger.warning("VS Code extension did not pick up trigger, falling back to console")
+            return await self._start_remote_console(
+                session_id, claude, project_name, project_path, prompt
+            )
+
+        # VS Code owns the process — we track it as a lightweight session
+        info = SessionInfo(
+            session_id=session_id,
+            project_name=project_name,
+            mode="remote",
+            started_at=datetime.now(timezone.utc),
+            process=None,  # VS Code manages the terminal
+        )
+        self._sessions[session_id] = info
+
+        await self._notifier.session_started(project=project_name, mode="remote")
         return info
 
     async def start_normal(self, project_name: str, project_path: str, prompt: str) -> SessionInfo:
@@ -190,6 +258,20 @@ class SessionManager:
 
         info._killed = True
         proc = info.process
+
+        if proc is None:
+            # VS Code-managed session — send kill trigger to extension
+            import json
+            kill_trigger = {
+                "title": f"Claude: {info.project_name}",
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
+            kill_file = TRIGGER_DIR / "terminal-kill.json"
+            kill_file.write_text(json.dumps(kill_trigger), encoding="utf-8")
+            self._sessions.pop(session_id, None)
+            return True
+
         if isinstance(proc, subprocess.Popen):
             # On Windows, terminate() only kills the parent — use taskkill /T to kill the tree
             if _IS_WINDOWS:

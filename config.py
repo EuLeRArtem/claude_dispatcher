@@ -14,6 +14,7 @@ class Config:
     poll_interval_sec: int = 60
     thresholds: list[int] = field(default_factory=lambda: [70, 85, 95])
     log_level: str = "INFO"
+    terminal: str = "console"  # "console" or "vscode"
 
 
 def load_config(config_path: str = "config.json") -> Config:
@@ -39,6 +40,7 @@ def load_config(config_path: str = "config.json") -> Config:
         poll_interval_sec=file_config.get("poll_interval_sec", 60),
         thresholds=file_config.get("thresholds", [70, 85, 95]),
         log_level=file_config.get("log_level", "INFO"),
+        terminal=file_config.get("terminal", "console"),
     )
 
 

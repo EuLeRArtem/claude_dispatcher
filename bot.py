@@ -68,7 +68,7 @@ def main():
     # Core components
     notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id)
     registry = ProjectRegistry(data_file="data/projects.json")
-    session_manager = SessionManager(notifier=notifier)
+    session_manager = SessionManager(notifier=notifier, terminal_mode=cfg.terminal)
 
     # Analytics
     collector = UsageCollector(data_dir="data/usage")

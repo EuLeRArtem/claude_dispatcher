@@ -2,5 +2,6 @@
   "projects_dir": "E:\\",
   "poll_interval_sec": 60,
   "thresholds": [70, 85, 95],
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "terminal": "console"
 }

@@ -1,8 +1,20 @@
 import logging
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
+
+_MENU_KB = InlineKeyboardMarkup(
+    [[InlineKeyboardButton("🏠 Меню", callback_data="main_menu")]]
+)
+
+
+def _session_kb(url: str | None = None) -> InlineKeyboardMarkup:
+    buttons = []
+    if url:
+        buttons.append([InlineKeyboardButton("🔗 Открыть сессию", url=url)])
+    buttons.append([InlineKeyboardButton("🏠 Меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(buttons)
 
 
 class Notifier:
@@ -10,10 +22,11 @@ class Notifier:
         self._bot = bot
         self._chat_id = chat_id
 
-    async def send(self, text: str) -> None:
+    async def send(self, text: str, reply_markup=None) -> None:
         try:
             await self._bot.send_message(
-                chat_id=self._chat_id, text=text, parse_mode="HTML"
+                chat_id=self._chat_id, text=text, parse_mode="HTML",
+                reply_markup=reply_markup,
             )
         except Exception:
             logger.exception("Failed to send notification")
@@ -31,11 +44,15 @@ class Notifier:
 
     async def session_finished(self, project: str, duration_min: int) -> None:
         await self.send(
-            f"✅ <b>{project}</b>: завершилась ({duration_min} мин)"
+            f"✅ <b>{project}</b>: завершилась ({duration_min} мин)",
+            reply_markup=_MENU_KB,
         )
 
     async def session_error(self, project: str, error: str) -> None:
-        await self.send(f"❌ <b>{project}</b>: ошибка\n<pre>{error}</pre>")
+        await self.send(
+            f"❌ <b>{project}</b>: ошибка\n<pre>{error}</pre>",
+            reply_markup=_MENU_KB,
+        )
 
     async def rate_limit(self, project: str) -> None:
         await self.send(f"⏸️ <b>{project}</b>: rate limit, ожидание")
@@ -52,15 +69,22 @@ class Notifier:
     async def permission_needed(
         self, project: str, url: str | None, message: str
     ) -> None:
-        link = f"\n📎 {url}" if url else ""
-        await self.send(f"⚠️ <b>{project}</b>: ждёт разрешения\n{message}{link}")
+        await self.send(
+            f"⚠️ <b>{project}</b>: ждёт разрешения\n{message}",
+            reply_markup=_session_kb(url),
+        )
 
     async def agent_idle(self, project: str, url: str | None = None) -> None:
-        link = f"\n📎 {url}" if url else ""
-        await self.send(f"💤 <b>{project}</b>: агент завершил, ждёт ввода{link}")
+        await self.send(
+            f"💤 <b>{project}</b>: агент завершил, ждёт ввода",
+            reply_markup=_session_kb(url),
+        )
 
     async def agent_stopped(
         self, project: str, error: str, details: str = ""
     ) -> None:
         detail_text = f"\n<pre>{details[:300]}</pre>" if details else ""
-        await self.send(f"⛔ <b>{project}</b>: {error}{detail_text}")
+        await self.send(
+            f"⛔ <b>{project}</b>: {error}{detail_text}",
+            reply_markup=_MENU_KB,
+        )

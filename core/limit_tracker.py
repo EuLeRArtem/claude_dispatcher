@@ -15,8 +15,15 @@ from core.notifier import Notifier
 
 logger = logging.getLogger(__name__)
 
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 _BACKOFF_FILE = Path("data/.usage_backoff")
+
+# Minimal ping to read rate-limit headers (cheapest possible call)
+_PING_PAYLOAD = {
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 1,
+    "messages": [{"role": "user", "content": "."}],
+}
 
 # Fallbacks if auto-detection fails
 _DEFAULT_BETA = "oauth-2025-04-20"
@@ -51,9 +58,9 @@ def _detect_claude_code_info() -> tuple[str, str]:
         # anthropic-beta from cli.js (pattern: SX="oauth-YYYY-MM-DD")
         cli_js = pkg_dir / "cli.js"
         if cli_js.exists():
-            # Read first 500KB — the constant is near the top of the bundled file
+            # Read first 5MB — bundled file is ~13MB, constant position may shift
             with open(cli_js, "r", encoding="utf-8") as f:
-                chunk = f.read(512_000)
+                chunk = f.read(5_000_000)
             m = re.search(r'SX="(oauth-\d{4}-\d{2}-\d{2})"', chunk)
             if m:
                 beta = m.group(1)
@@ -78,21 +85,38 @@ class UsageData:
     timestamp: str = ""
 
 
-def parse_usage_response(data: dict) -> UsageData:
-    five_hour = data.get("five_hour") or {}
-    seven_day = data.get("seven_day") or {}
-    seven_day_sonnet = data.get("seven_day_sonnet") or {}
+def parse_usage_headers(headers) -> UsageData:
+    """Extract rate-limit utilization from /v1/messages response headers.
+
+    Headers use 0.0-1.0 scale; reset values are Unix timestamps.
+    """
+    five_h_util = float(headers.get("anthropic-ratelimit-unified-5h-utilization", 0))
+    seven_d_util = float(headers.get("anthropic-ratelimit-unified-7d-utilization", 0))
+
+    five_h_resets_at = ""
+    raw = headers.get("anthropic-ratelimit-unified-5h-reset", "")
+    if raw:
+        five_h_resets_at = datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat()
+
+    seven_d_resets_at = ""
+    raw = headers.get("anthropic-ratelimit-unified-7d-reset", "")
+    if raw:
+        seven_d_resets_at = datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat()
+
     return UsageData(
-        five_hour_util=five_hour.get("utilization", 0.0) / 100,
-        five_hour_resets_at=five_hour.get("resets_at", ""),
-        seven_day_util=seven_day.get("utilization", 0.0) / 100,
-        seven_day_resets_at=seven_day.get("resets_at", ""),
-        seven_day_sonnet_util=seven_day_sonnet.get("utilization", 0.0) / 100,
+        five_hour_util=five_h_util,
+        five_hour_resets_at=five_h_resets_at,
+        seven_day_util=seven_d_util,
+        seven_day_resets_at=seven_d_resets_at,
+        seven_day_sonnet_util=0.0,  # not available in response headers
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
 
 class LimitTracker:
+    _MIN_BACKOFF = 60
+    _MAX_BACKOFF = 900  # 15 minutes
+
     def __init__(
         self,
         notifier: Notifier,
@@ -110,6 +134,7 @@ class LimitTracker:
         self._running = False
         self._task: asyncio.Task | None = None
         self._backoff_seconds: int = self._load_backoff()
+        self._consecutive_429: int = 0
         self.latest: UsageData | None = None
 
     @staticmethod
@@ -177,21 +202,33 @@ class LimitTracker:
                     "anthropic-beta": ANTHROPIC_BETA,
                     "User-Agent": f"claude-code/{CLAUDE_CODE_VERSION}",
                 }
-                async with session.get(USAGE_URL, headers=headers) as resp:
+                async with session.post(
+                    MESSAGES_URL, headers=headers, json=_PING_PAYLOAD,
+                ) as resp:
                     if resp.status == 429:
-                        retry_after = int(resp.headers.get("retry-after", 60))
-                        logger.info("Usage API rate limited, retry in %ds", retry_after)
+                        self._consecutive_429 += 1
+                        raw_retry = int(resp.headers.get("retry-after", 0))
+                        exp_backoff = min(
+                            self._MIN_BACKOFF * (2 ** (self._consecutive_429 - 1)),
+                            self._MAX_BACKOFF,
+                        )
+                        retry_after = max(raw_retry, exp_backoff)
+                        logger.warning(
+                            "Rate limited (attempt %d), retry in %ds (header=%ds)",
+                            self._consecutive_429, retry_after, raw_retry,
+                        )
                         self._backoff_seconds = retry_after
                         self._save_backoff(retry_after)
                         return None
-                    if resp.status != 200:
-                        logger.warning("Usage API returned %d", resp.status)
+                    if resp.status not in (200, 201):
+                        logger.warning("Messages API ping returned %d", resp.status)
                         return None
-                    data = await resp.json()
+                    await resp.read()
                     _BACKOFF_FILE.unlink(missing_ok=True)
-                    return parse_usage_response(data)
+                    self._consecutive_429 = 0
+                    return parse_usage_headers(resp.headers)
         except Exception:
-            logger.exception("Failed to poll usage API")
+            logger.exception("Failed to poll usage via messages ping")
             return None
 
     async def _notify_thresholds(self, usage: UsageData) -> None:

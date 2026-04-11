@@ -28,8 +28,11 @@ class ProjectRegistry:
         if not base.is_dir():
             return results
         for child in sorted(base.iterdir()):
-            if child.is_dir() and (child / ".git").exists():
-                results.append({"name": child.name, "path": str(child)})
+            try:
+                if child.is_dir() and (child / ".git").exists():
+                    results.append({"name": child.name, "path": str(child)})
+            except (OSError, PermissionError):
+                continue
         return results
 
     def add(self, name: str, path: str) -> dict:

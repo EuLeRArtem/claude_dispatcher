@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from analytics.collector import UsageCollector
 from analytics.charts import UsageCharts
@@ -48,3 +49,40 @@ def test_generate_heatmap(charts):
 def test_generate_day_no_data(charts):
     path = charts.generate_day("2099-01-01")
     assert path is None
+
+
+def test_generate_token_cost_returns_path(tmp_path):
+    cost_tracker = MagicMock()
+    cost_tracker.load.return_value = [
+        {
+            "timestamp": "2026-04-12T10:00:00+00:00",
+            "model": "claude-opus-4-6",
+            "output_tokens": "5000",
+            "delta_5h": "0.05",
+            "concurrent": "False",
+        },
+        {
+            "timestamp": "2026-04-12T14:00:00+00:00",
+            "model": "claude-opus-4-6",
+            "output_tokens": "10000",
+            "delta_5h": "0.08",
+            "concurrent": "False",
+        },
+    ]
+    collector = MagicMock()
+    collector.load.return_value = []
+    charts = UsageCharts(collector=collector, output_dir=str(tmp_path), cost_tracker=cost_tracker)
+    result = charts.generate_token_cost("2026-04-12")
+    assert result is not None
+    assert result.endswith(".png")
+    assert Path(result).exists()
+
+
+def test_generate_token_cost_no_data(tmp_path):
+    cost_tracker = MagicMock()
+    cost_tracker.load.return_value = []
+    collector = MagicMock()
+    collector.load.return_value = []
+    charts = UsageCharts(collector=collector, output_dir=str(tmp_path), cost_tracker=cost_tracker)
+    result = charts.generate_token_cost("2026-04-12")
+    assert result is None

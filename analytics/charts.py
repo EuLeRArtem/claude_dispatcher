@@ -13,10 +13,18 @@ from analytics.collector import UsageCollector
 
 logger = logging.getLogger(__name__)
 
+_MODEL_COLORS = {
+    "claude-opus-4-6": "#7C3AED",
+    "claude-sonnet-4-6": "#2563EB",
+    "claude-haiku-4-5-20251001": "#10B981",
+}
+_DEFAULT_COLOR = "#6B7280"
+
 
 class UsageCharts:
-    def __init__(self, collector: UsageCollector, output_dir: str = "data/charts"):
+    def __init__(self, collector: UsageCollector, output_dir: str = "data/charts", cost_tracker=None):
         self._collector = collector
+        self._cost_tracker = cost_tracker
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -124,6 +132,60 @@ class UsageCharts:
         fig.tight_layout()
 
         out_path = str(self._output_dir / f"heatmap_{year_month}.png")
+        fig.savefig(out_path, dpi=100)
+        plt.close(fig)
+        return out_path
+
+    def generate_token_cost(self, date_str: str) -> str | None:
+        """Generate scatter plot: unit cost (% per 1K output tokens) over time."""
+        if not self._cost_tracker:
+            return None
+
+        year_month = date_str[:7]
+        rows = self._cost_tracker.load(year_month)
+
+        # Filter: need numeric delta_5h and output_tokens > 0
+        valid = []
+        for row in rows:
+            try:
+                delta = float(row["delta_5h"])
+                out_tokens = int(row["output_tokens"])
+                if out_tokens <= 0:
+                    continue
+                valid.append(row)
+            except (ValueError, KeyError):
+                continue
+
+        if not valid:
+            return None
+
+        times = [datetime.fromisoformat(r["timestamp"]) for r in valid]
+        costs = [float(r["delta_5h"]) / int(r["output_tokens"]) * 1000 * 100 for r in valid]
+        models = [r.get("model", "unknown") for r in valid]
+        concurrent = [r.get("concurrent", "False") == "True" for r in valid]
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        for model in set(models):
+            color = _MODEL_COLORS.get(model, _DEFAULT_COLOR)
+            label = model.split("-")[1] if "-" in model else model
+            idxs = [i for i, m in enumerate(models) if m == model]
+            xs = [times[i] for i in idxs]
+            ys = [costs[i] for i in idxs]
+            alphas = [0.3 if concurrent[i] else 1.0 for i in idxs]
+            for x, y, a in zip(xs, ys, alphas):
+                ax.scatter(x, y, color=color, alpha=a, s=60, zorder=3)
+            ax.scatter([], [], color=color, label=label, s=60)
+
+        ax.set_ylabel("% 5h за 1K output tokens")
+        ax.set_title(f"Удельная стоимость токенов — {year_month}")
+        ax.legend()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        ax.grid(True, alpha=0.3)
+        fig.autofmt_xdate()
+        fig.tight_layout()
+
+        out_path = str(self._output_dir / f"cost_{year_month}.png")
         fig.savefig(out_path, dpi=100)
         plt.close(fig)
         return out_path

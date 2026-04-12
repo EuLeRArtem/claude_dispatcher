@@ -20,7 +20,7 @@ def notifier(bot):
 async def test_send_message(notifier, bot):
     await notifier.send("Hello test")
     bot.send_message.assert_called_once_with(
-        chat_id=123, text="Hello test", parse_mode="HTML"
+        chat_id=123, text="Hello test", parse_mode="HTML", reply_markup=None,
     )
 
 
@@ -79,7 +79,10 @@ async def test_permission_needed(notifier, bot):
     bot.send_message.assert_called_once()
     text = bot.send_message.call_args.kwargs["text"]
     assert "myproject" in text
-    assert "session_abc" in text
+    # URL goes into reply_markup button, not text
+    markup = bot.send_message.call_args.kwargs["reply_markup"]
+    urls = [btn.url for row in markup.inline_keyboard for btn in row if btn.url]
+    assert any("session_abc" in u for u in urls)
 
 
 @pytest.mark.asyncio

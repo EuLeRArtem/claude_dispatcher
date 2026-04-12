@@ -92,3 +92,12 @@ class Notifier:
             f"⛔ <b>{project}</b>: {error}{detail_text}",
             reply_markup=_MENU_KB,
         )
+
+    async def cost_warning(
+        self, project: str, cost_per_1k: float, period: str
+    ) -> None:
+        await self.send(
+            f"💰 <b>{project}</b>: высокая стоимость токенов\n"
+            f"{period}: {cost_per_1k:.3f}% за 1K output",
+            reply_markup=_MENU_KB,
+        )

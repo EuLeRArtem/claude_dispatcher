@@ -101,3 +101,14 @@ async def test_agent_stopped(notifier, bot):
     await notifier.agent_stopped(project="proj", error="rate_limit", details="retry 60s")
     text = bot.send_message.call_args.kwargs["text"]
     assert "rate_limit" in text
+
+
+@pytest.mark.asyncio
+async def test_cost_warning(notifier, bot):
+    await notifier.cost_warning(
+        project="test-proj", cost_per_1k=0.05, period="5h"
+    )
+    bot.send_message.assert_called_once()
+    text = bot.send_message.call_args.kwargs["text"]
+    assert "test-proj" in text
+    assert "5h" in text

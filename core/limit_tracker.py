@@ -189,7 +189,7 @@ class LimitTracker:
 
         return triggered
 
-    async def _poll_once(self) -> UsageData | None:
+    async def poll_once(self) -> UsageData | None:
         token = self._get_token()
         if not token:
             return None
@@ -267,7 +267,7 @@ class LimitTracker:
                 await asyncio.sleep(self._backoff_seconds)
                 self._backoff_seconds = 0
                 continue
-            usage = await self._poll_once()
+            usage = await self.poll_once()
             if usage:
                 self.latest = usage
                 await self._notify_thresholds(usage)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.limit_tracker import UsageData
 from core.notifier import Notifier
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ class SessionInfo:
     started_at: datetime
     process: object  # asyncio.subprocess.Process or subprocess.Popen or None
     url: str | None = None
+    util_snapshot: UsageData | None = None
     _url_file: str | None = None
     _killed: bool = False
 
@@ -98,17 +100,27 @@ class SessionInfo:
 
 
 class SessionManager:
-    def __init__(self, notifier: Notifier, ide: str = "none", ide_trigger_timeout: int = 30):
+    def __init__(self, notifier: Notifier, ide: str = "none", ide_trigger_timeout: int = 30, limit_tracker=None):
         self._notifier = notifier
         self._ide = ide
         self._ide_trigger_timeout = ide_trigger_timeout
         self._sessions: dict[str, SessionInfo] = {}
+        self._limit_tracker = limit_tracker
 
     def list_sessions(self) -> list[SessionInfo]:
         return list(self._sessions.values())
 
     def get_session(self, session_id: str) -> SessionInfo | None:
         return self._sessions.get(session_id)
+
+    async def _capture_util_snapshot(self) -> UsageData | None:
+        if self._limit_tracker is None:
+            return None
+        try:
+            return await self._limit_tracker.poll_once()
+        except Exception:
+            logger.warning("Failed to capture util snapshot", exc_info=True)
+            return None
 
     # --- Public API ---
 
@@ -122,6 +134,7 @@ class SessionManager:
             )
 
         # Unix: pipe stdout to capture URL
+        snapshot = await self._capture_util_snapshot()
         cmd = [claude, "--remote-control"]
         if prompt:
             cmd.append(prompt)
@@ -132,6 +145,7 @@ class SessionManager:
             mode="remote",
             started_at=datetime.now(timezone.utc),
             process=process,
+            util_snapshot=snapshot,
         )
         self._sessions[session_id] = info
         asyncio.create_task(self._read_remote_output(info))
@@ -140,6 +154,7 @@ class SessionManager:
 
     async def start_normal(self, project_name: str, project_path: str, prompt: str) -> SessionInfo:
         claude = _find_claude()
+        snapshot = await self._capture_util_snapshot()
         cmd = [claude, "-p", "--output-format", "json", prompt]
 
         process = await _create_process(cmd, cwd=project_path)
@@ -151,6 +166,7 @@ class SessionManager:
             mode="normal",
             started_at=datetime.now(timezone.utc),
             process=process,
+            util_snapshot=snapshot,
         )
         self._sessions[session_id] = info
 
@@ -322,12 +338,14 @@ class SessionManager:
             )
 
         # IDE owns the process
+        snapshot = await self._capture_util_snapshot()
         info = SessionInfo(
             session_id=session_id,
             project_name=project_name,
             mode="remote",
             started_at=datetime.now(timezone.utc),
             process=None,
+            util_snapshot=snapshot,
         )
         self._sessions[session_id] = info
 
@@ -346,6 +364,7 @@ class SessionManager:
 
         logger.info("Remote control (console): cmd=%s cwd=%s", cmd, project_path)
 
+        snapshot = await self._capture_util_snapshot()
         process = subprocess.Popen(
             cmd,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
@@ -359,6 +378,7 @@ class SessionManager:
             mode="remote",
             started_at=datetime.now(timezone.utc),
             process=process,
+            util_snapshot=snapshot,
         )
         self._sessions[session_id] = info
 

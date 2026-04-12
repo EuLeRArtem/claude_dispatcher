@@ -9,6 +9,7 @@ from config import load_config, get_claude_credentials_path
 from core.notifier import Notifier
 from core.project_registry import ProjectRegistry
 from core.session_manager import SessionManager
+from core.cost_tracker import CostTracker
 from core.hook_server import HookServer
 from core.limit_tracker import LimitTracker
 from analytics.collector import UsageCollector
@@ -69,20 +70,30 @@ def main():
     # Core components
     notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id)
     registry = ProjectRegistry(data_file="data/projects.json")
-    session_manager = SessionManager(notifier=notifier, ide=cfg.ide, ide_trigger_timeout=cfg.ide_trigger_timeout)
-    hook_server = HookServer(notifier=notifier, session_manager=session_manager, port=cfg.hook_port)
 
     # Analytics
     collector = UsageCollector(data_dir="data/usage")
-    charts = UsageCharts(collector=collector, output_dir="data/charts")
+    cost_tracker = CostTracker(data_dir="data/costs")
+    charts = UsageCharts(collector=collector, output_dir="data/charts", cost_tracker=cost_tracker)
 
-    # Limit tracker with collector callback
+    # Limit tracker (before session_manager — needed for util snapshots)
     limit_tracker = LimitTracker(
         notifier=notifier,
         thresholds=cfg.thresholds,
         poll_interval_sec=cfg.poll_interval_sec,
         credentials_path=get_claude_credentials_path(),
         on_usage=collector.record,
+    )
+
+    session_manager = SessionManager(
+        notifier=notifier, ide=cfg.ide,
+        ide_trigger_timeout=cfg.ide_trigger_timeout,
+        limit_tracker=limit_tracker,
+    )
+    hook_server = HookServer(
+        notifier=notifier, session_manager=session_manager,
+        cost_tracker=cost_tracker, limit_tracker=limit_tracker,
+        port=cfg.hook_port,
     )
 
     # Store config in bot_data for handlers

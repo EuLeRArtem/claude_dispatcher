@@ -15,15 +15,13 @@ from core.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 # Conversation states
-SELECT_PROJECT, SELECT_MODE, ENTER_PROMPT = range(3)
+SELECT_PROJECT, ENTER_PROMPT = range(2)
 
 # Callback data
 CB_SESSIONS = "sessions"
 CB_NEW_SESSION = "new_session"
 CB_SESSION_PROJECT = "sess_proj:"
-CB_SESSION_MODE = "sess_mode:"
 CB_SESSION_KILL = "sess_kill:"
-CB_SESSION_BACK_PROJ = "sess_back_proj"
 CB_BACK_MAIN = "main_menu"
 
 
@@ -48,9 +46,8 @@ def create_session_handlers(
             lines = ["📋 <b>Активные сессии:</b>\n"]
             keyboard = []
             for s in sessions:
-                mode_label = "remote" if s.mode == "remote" else "обычная"
                 lines.append(
-                    f"  • <b>{s.project_name}</b> — {mode_label} — {s.duration_minutes()} мин"
+                    f"  • <b>{s.project_name}</b> — {s.duration_minutes()} мин"
                 )
                 keyboard.append([
                     InlineKeyboardButton(
@@ -113,43 +110,10 @@ def create_session_handlers(
         project_name = query.data.replace(CB_SESSION_PROJECT, "")
         context.user_data["session_project"] = project_name
 
-        keyboard = [
-            [InlineKeyboardButton("🖥️ Remote Control", callback_data=f"{CB_SESSION_MODE}remote")],
-            [InlineKeyboardButton("▶️ Обычная", callback_data=f"{CB_SESSION_MODE}normal")],
-            [InlineKeyboardButton("🔙 Назад", callback_data=CB_SESSION_BACK_PROJ)],
-        ]
         await query.edit_message_text(
-            f"Проект: <b>{project_name}</b>\nРежим?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            f"Проект: <b>{project_name}</b>\nВведи промпт:",
             parse_mode="HTML",
         )
-        return SELECT_MODE
-
-    @auth_check
-    async def wizard_back_to_projects(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-
-        projects = registry.list()
-        keyboard = [
-            [InlineKeyboardButton(p["name"], callback_data=f"{CB_SESSION_PROJECT}{p['name']}")]
-            for p in projects
-        ]
-        keyboard.append([InlineKeyboardButton("🔙 Отмена", callback_data=CB_BACK_MAIN)])
-        await query.edit_message_text(
-            "Какой проект?", reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return SELECT_PROJECT
-
-    @auth_check
-    async def wizard_select_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-
-        mode = query.data.replace(CB_SESSION_MODE, "")
-        context.user_data["session_mode"] = mode
-
-        await query.edit_message_text("Введи промпт:")
         return ENTER_PROMPT
 
     @auth_check
@@ -160,19 +124,15 @@ def create_session_handlers(
             return ENTER_PROMPT
 
         project_name = context.user_data.get("session_project")
-        mode = context.user_data.get("session_mode")
 
         project = registry.get(project_name)
         if not project:
             await update.message.reply_text("⚠️ Проект не найден")
             return ConversationHandler.END
 
-        await update.message.reply_text(f"⏳ Запускаю {mode} сессию для <b>{project_name}</b>...", parse_mode="HTML")
+        await update.message.reply_text(f"⏳ Запускаю сессию для <b>{project_name}</b>...", parse_mode="HTML")
 
-        if mode == "remote":
-            await session_manager.start_remote(project_name, project["path"], prompt)
-        else:
-            await session_manager.start_normal(project_name, project["path"], prompt)
+        await session_manager.start_remote(project_name, project["path"], prompt)
 
         # Show main menu after session creation
         if main_menu_callback:
@@ -190,10 +150,6 @@ def create_session_handlers(
         entry_points=[CallbackQueryHandler(wizard_start, pattern=f"^{CB_NEW_SESSION}$")],
         states={
             SELECT_PROJECT: [CallbackQueryHandler(wizard_select_project, pattern=f"^{CB_SESSION_PROJECT}")],
-            SELECT_MODE: [
-                CallbackQueryHandler(wizard_back_to_projects, pattern=f"^{CB_SESSION_BACK_PROJ}$"),
-                CallbackQueryHandler(wizard_select_mode, pattern=f"^{CB_SESSION_MODE}"),
-            ],
             ENTER_PROMPT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, wizard_enter_prompt),
             ],

@@ -47,14 +47,15 @@ export function activate(context: vscode.ExtensionContext) {
 		fs.mkdirSync(TRIGGER_DIR, { recursive: true });
 	}
 
-	// Watch for trigger file changes
-	const watcher = fs.watch(TRIGGER_DIR, (eventType, filename) => {
-		if (filename === 'terminal.json') {
+	// Poll trigger files instead of fs.watch (unreliable on Windows)
+	const pollInterval = setInterval(() => {
+		if (fs.existsSync(TRIGGER_FILE)) {
 			handleTrigger();
-		} else if (filename === 'terminal-kill.json') {
+		}
+		if (fs.existsSync(KILL_FILE)) {
 			handleKill();
 		}
-	});
+	}, 1_000);
 
 	// Clean up managed terminals map when terminals close
 	const closeListener = vscode.window.onDidCloseTerminal((terminal) => {
@@ -67,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(
-		{ dispose: () => watcher.close() },
+		{ dispose: () => clearInterval(pollInterval) },
 		closeListener,
 	);
 
@@ -111,6 +112,19 @@ function handleTrigger(): void {
 			return;
 		}
 
+		// Only handle triggers whose cwd matches this window's workspace
+		const folders = vscode.workspace.workspaceFolders;
+		if (folders && folders.length > 0) {
+			const cwdNorm = request.cwd.toLowerCase().replace(/\\/g, '/');
+			const isMyProject = folders.some(f => {
+				const folderNorm = f.uri.fsPath.toLowerCase().replace(/\\/g, '/');
+				return cwdNorm.startsWith(folderNorm);
+			});
+			if (!isMyProject) {
+				return; // Let the correct window handle this
+			}
+		}
+
 		lastTimestamp = request.timestamp;
 
 		const title = request.title || 'Claude Session';
@@ -136,6 +150,9 @@ function handleTrigger(): void {
 
 		// Write ack
 		fs.writeFileSync(ACK_FILE, String(request.timestamp));
+
+		// Remove trigger so other windows stop polling it
+		try { fs.unlinkSync(TRIGGER_FILE); } catch { /* ignore */ }
 
 	} catch (err) {
 		console.error('Claude Dispatcher: error handling trigger', err);

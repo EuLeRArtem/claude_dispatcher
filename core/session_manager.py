@@ -244,21 +244,22 @@ class SessionManager:
     async def _ensure_ide_ready(self, project_path: str) -> bool:
         """Ensure IDE is open with the project and extension is active.
 
-        1. Check if extension heartbeat is fresh (< 15s)
-        2. If not — launch IDE with project path and wait for heartbeat
+        Always opens the target project folder (VS Code will reuse or create a window).
+        Then waits for extension heartbeat if not already active.
         """
         ide_cmd = shutil.which(_IDE_CLI[self._ide])
         if not ide_cmd:
             logger.warning("IDE CLI '%s' not found in PATH", _IDE_CLI[self._ide])
             return False
 
-        if self._is_extension_ready():
-            logger.info("IDE extension already active, skipping relaunch")
-            return True
+        already_ready = self._is_extension_ready()
 
-        # Launch IDE with the project
-        logger.info("Launching %s for %s", ide_cmd, project_path)
+        # Always open the target project — VS Code will focus/create the right window
+        logger.info("Opening %s for %s (extension already_ready=%s)", ide_cmd, project_path, already_ready)
         subprocess.Popen([ide_cmd, project_path], creationflags=subprocess.CREATE_NO_WINDOW)
+
+        if already_ready:
+            return True
 
         # Wait for extension to become ready (heartbeat file)
         for _ in range(30):  # 15 seconds

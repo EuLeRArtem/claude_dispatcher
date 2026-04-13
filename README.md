@@ -119,6 +119,7 @@ sudo bash service/install-linux.sh
 
 Автоматически (PowerShell от администратора):
 ```powershell
+cd E:\claude_dispatcher
 .\service\install-windows.ps1
 ```
 

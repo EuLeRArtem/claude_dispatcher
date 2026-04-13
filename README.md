@@ -148,9 +148,21 @@ Unregister-ScheduledTask -TaskName ClaudeDispatcher  # удаление
 
 При `ide: "vscode"` или `"cursor"` бот открывает сессии во встроенном терминале IDE через VS Code extension.
 
+**Установка из .vsix (рекомендуется):**
+
+1. Собери пакет (если ещё не собран):
+   ```bash
+   cd vscode-extension
+   npm install && npm run compile && npm run package
+   ```
+2. В VS Code / Cursor: `Ctrl+Shift+P` → **Extensions: Install from VSIX...** → выбери `vscode-extension/claude-dispatcher-terminal-0.1.0.vsix`
+3. Перезагрузи IDE
+
+**Или для разработки:**
+
 1. Открой папку `vscode-extension/` в VS Code
 2. `npm install && npm run compile`
-3. F5 для запуска в режиме разработки (или упакуй через `vsce package`)
+3. F5 для запуска в режиме отладки
 
 Extension следит за триггер-файлами в `~/.claude-dispatcher/` и автоматически открывает терминалы.
 

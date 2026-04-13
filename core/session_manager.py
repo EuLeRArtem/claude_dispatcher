@@ -253,9 +253,7 @@ class SessionManager:
             return False
 
         if self._is_extension_ready():
-            logger.info("IDE extension already active")
-            subprocess.Popen([ide_cmd, project_path], creationflags=subprocess.CREATE_NO_WINDOW)
-            await asyncio.sleep(1)
+            logger.info("IDE extension already active, skipping relaunch")
             return True
 
         # Launch IDE with the project

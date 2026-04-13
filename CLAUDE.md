@@ -37,7 +37,7 @@ config.py               — загрузка .env + config.json → dataclass Co
 │   ├── charts.py           — matplotlib графики (day, week, heatmap)
 │   └── handlers.py         — Telegram UI для лимитов и графиков
 │
-├── service/            — скрипты деплоя (systemd, NSSM)
+├── service/            — скрипты автозапуска (systemd, Task Scheduler)
 ├── vscode-extension/   — VS Code/Cursor extension для IDE-интеграции
 └── tests/              — pytest + pytest-asyncio
 ```

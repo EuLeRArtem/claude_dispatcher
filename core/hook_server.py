@@ -134,11 +134,7 @@ class HookServer:
         if event == "Stop":
             last_msg = data.get("last_assistant_message", "")
             truncated = last_msg[:300] + "..." if len(last_msg) > 300 else last_msg
-            from core.notifier import _MENU_KB
-            await self._notifier.send(
-                f"✅ <b>{project}</b>: задача завершена\n<pre>{truncated}</pre>",
-                reply_markup=_MENU_KB,
-            )
+            await self._notifier.task_completed(project=project, summary=truncated)
             # Record session cost
             session = self._find_session_by_cwd(data.get("cwd", ""))
             await self._record_session_cost(data, project, session)

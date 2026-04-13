@@ -13,6 +13,7 @@ def notifier():
     n.agent_stopped = AsyncMock()
     n.session_finished = AsyncMock()
     n.send = AsyncMock()
+    n.task_completed = AsyncMock()
     return n
 
 
@@ -48,8 +49,8 @@ async def test_stop_event(client, notifier):
         "last_assistant_message": "Done implementing the feature.",
     })
     assert resp.status == 200
-    notifier.send.assert_called_once()
-    text = notifier.send.call_args[0][0]
+    notifier.task_completed.assert_called_once()
+    text = notifier.task_completed.call_args[1]["summary"]
     assert "Done implementing" in text
 
 
@@ -227,6 +228,6 @@ async def test_stop_without_transcript_still_works(client_with_cost, cost_tracke
         "last_assistant_message": "Done.",
     })
     assert resp.status == 200
-    notifier.send.assert_called_once()
+    notifier.task_completed.assert_called_once()
     # No transcript_path → no cost record
     cost_tracker.record.assert_not_called()

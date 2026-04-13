@@ -119,6 +119,14 @@ class Notifier:
             reply_markup=_MENU_KB,
         )
 
+    async def task_completed(self, project: str, summary: str) -> None:
+        if not self._is_enabled("sessions"):
+            return
+        await self.send(
+            f"✅ <b>{project}</b>: задача завершена\n<pre>{summary}</pre>",
+            reply_markup=_MENU_KB,
+        )
+
     async def cost_warning(
         self, project: str, cost_per_1k: float, period: str
     ) -> None:

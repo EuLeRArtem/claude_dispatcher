@@ -15,6 +15,7 @@ CB_CHART_DAY = "chart_day"
 CB_CHART_WEEK = "chart_week"
 CB_CHART_HEATMAP = "chart_heatmap"
 CB_CHART_COST = "chart_cost"
+CB_CHART_TOKENS = "chart_tokens"
 
 
 def _format_usage_text(limit_tracker: LimitTracker) -> str | None:
@@ -62,7 +63,10 @@ def create_analytics_handlers(
                 InlineKeyboardButton("📈 Неделя", callback_data=CB_CHART_WEEK),
                 InlineKeyboardButton("🗓 Heatmap", callback_data=CB_CHART_HEATMAP),
             ],
-            [InlineKeyboardButton("💰 Стоимость", callback_data=CB_CHART_COST)],
+            [
+                InlineKeyboardButton("💰 Стоимость", callback_data=CB_CHART_COST),
+                InlineKeyboardButton("📊 Токены", callback_data=CB_CHART_TOKENS),
+            ],
             [InlineKeyboardButton("🔙 Назад", callback_data=CB_BACK_MAIN)],
         ]
         markup = InlineKeyboardMarkup(keyboard)
@@ -90,7 +94,10 @@ def create_analytics_handlers(
             InlineKeyboardButton("📈 Неделя", callback_data=CB_CHART_WEEK),
             InlineKeyboardButton("🗓 Heatmap", callback_data=CB_CHART_HEATMAP),
         ],
-        [InlineKeyboardButton("💰 Стоимость", callback_data=CB_CHART_COST)],
+        [
+            InlineKeyboardButton("💰 Стоимость", callback_data=CB_CHART_COST),
+            InlineKeyboardButton("📊 Токены", callback_data=CB_CHART_TOKENS),
+        ],
         [InlineKeyboardButton("📊 К лимитам", callback_data=CB_LIMITS)],
     ])
 
@@ -132,6 +139,11 @@ def create_analytics_handlers(
         await _send_chart(update, charts.generate_token_cost(today), f"💰 Стоимость токенов — {today[:7]}")
 
     @auth_check
+    async def chart_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        await _send_chart(update, charts.generate_tokens(today), f"📊 Токены — {today}")
+
+    @auth_check
     async def cmd_usage_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = charts.generate_day(today)
@@ -167,6 +179,7 @@ def create_analytics_handlers(
         CallbackQueryHandler(chart_week, pattern=f"^{CB_CHART_WEEK}$"),
         CallbackQueryHandler(chart_heatmap, pattern=f"^{CB_CHART_HEATMAP}$"),
         CallbackQueryHandler(chart_cost, pattern=f"^{CB_CHART_COST}$"),
+        CallbackQueryHandler(chart_tokens, pattern=f"^{CB_CHART_TOKENS}$"),
         CommandHandler("usage", show_limits),
         CommandHandler("usage_day", cmd_usage_day),
         CommandHandler("usage_week", cmd_usage_week),

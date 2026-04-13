@@ -10,6 +10,7 @@ import matplotlib.dates as mdates
 import numpy as np
 
 from analytics.collector import UsageCollector
+from core.cost_tracker import CostTracker
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,94 @@ class UsageCharts:
         fig.tight_layout()
 
         out_path = str(self._output_dir / f"cost_{year_month}.png")
+        fig.savefig(out_path, dpi=100)
+        plt.close(fig)
+        return out_path
+
+    def _load_cost_rows(self, start: datetime, end: datetime) -> list[dict]:
+        """Load cost tracker rows spanning start..end (may cross month boundary)."""
+        rows = []
+        months_seen = set()
+        cur = start
+        while cur <= end:
+            ym = cur.strftime("%Y-%m")
+            if ym not in months_seen and self._cost_tracker:
+                months_seen.add(ym)
+                rows.extend(self._cost_tracker.load(ym))
+            cur += timedelta(days=28)
+        # Filter and sort
+        result = []
+        for r in rows:
+            try:
+                dt = datetime.fromisoformat(r["timestamp"])
+                if start <= dt <= end:
+                    result.append(r)
+            except (ValueError, KeyError):
+                continue
+        result.sort(key=lambda r: r["timestamp"])
+        return result
+
+    @staticmethod
+    def _format_tokens(val, _pos):
+        if val >= 1_000_000:
+            return f"{val / 1_000_000:.1f}M"
+        if val >= 1_000:
+            return f"{val / 1_000:.0f}K"
+        return f"{val:.0f}"
+
+    def generate_tokens(self, date_str: str) -> str | None:
+        """Generate cumulative input/output token chart: day (top) + week (bottom)."""
+        if not self._cost_tracker:
+            return None
+
+        day_end = datetime.fromisoformat(f"{date_str}T23:59:59+00:00")
+        day_start = datetime.fromisoformat(f"{date_str}T00:00:00+00:00")
+        week_start = day_end - timedelta(days=7)
+
+        week_rows = self._load_cost_rows(week_start, day_end)
+        if not week_rows:
+            return None
+
+        day_rows = [r for r in week_rows
+                    if datetime.fromisoformat(r["timestamp"]) >= day_start]
+
+        fig, (ax_day, ax_week) = plt.subplots(2, 1, figsize=(10, 8))
+
+        for ax, rows, title in [
+            (ax_day, day_rows, f"Токены — {date_str}"),
+            (ax_week, week_rows, f"Токены — неделя до {date_str}"),
+        ]:
+            if not rows:
+                ax.set_title(title)
+                ax.text(0.5, 0.5, "Нет данных", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=14, color="gray")
+                continue
+
+            times = [datetime.fromisoformat(r["timestamp"]) for r in rows]
+            cum_input = []
+            cum_output = []
+            s_in = 0
+            s_out = 0
+            for r in rows:
+                s_in += int(r.get("input_tokens", 0))
+                s_out += int(r.get("output_tokens", 0))
+                cum_input.append(s_in)
+                cum_output.append(s_out)
+
+            ax.step(times, cum_input, label="Input", linewidth=2, color="#2563EB", where="post")
+            ax.step(times, cum_output, label="Output", linewidth=2, color="#7C3AED", where="post")
+            ax.set_title(title)
+            ax.set_ylabel("Токены")
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(self._format_tokens))
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            if ax is ax_day:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            else:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+
+        fig.tight_layout()
+        out_path = str(self._output_dir / f"tokens_{date_str}.png")
         fig.savefig(out_path, dpi=100)
         plt.close(fig)
         return out_path

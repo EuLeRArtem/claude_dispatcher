@@ -1,7 +1,8 @@
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from core.notifier import Notifier
+from core.notification_settings import NotificationSettings
 
 
 @pytest.fixture
@@ -115,3 +116,53 @@ async def test_cost_warning(notifier, bot):
     text = bot.send_message.call_args.kwargs["text"]
     assert "test-proj" in text
     assert "5h" in text
+
+
+# --- Notification settings filtering ---
+
+@pytest.fixture
+def mock_settings():
+    s = MagicMock(spec=NotificationSettings)
+    s.is_enabled = MagicMock(return_value=True)
+    return s
+
+
+@pytest.fixture
+def notifier_with_settings(bot, mock_settings):
+    return Notifier(bot=bot, chat_id=123, settings=mock_settings)
+
+
+@pytest.mark.asyncio
+async def test_session_started_skipped_when_disabled(notifier_with_settings, bot, mock_settings):
+    mock_settings.is_enabled.return_value = False
+    await notifier_with_settings.session_started(project="proj", mode="normal")
+    bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_limit_warning_skipped_when_disabled(notifier_with_settings, bot, mock_settings):
+    mock_settings.is_enabled.return_value = False
+    await notifier_with_settings.limit_warning(period="5h", percent=70, reset_minutes=10)
+    bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_permission_needed_always_sends(notifier_with_settings, bot, mock_settings):
+    mock_settings.is_enabled.return_value = False
+    await notifier_with_settings.permission_needed(project="proj", url=None, message="needs perm")
+    bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_idle_skipped_when_disabled(notifier_with_settings, bot, mock_settings):
+    mock_settings.is_enabled.return_value = False
+    await notifier_with_settings.agent_idle(project="proj")
+    bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notifier_works_without_settings(bot):
+    """Existing Notifier without settings still sends everything."""
+    n = Notifier(bot=bot, chat_id=123)
+    await n.limit_warning(period="5h", percent=70, reset_minutes=10)
+    bot.send_message.assert_called_once()

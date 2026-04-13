@@ -7,6 +7,7 @@ from telegram.ext import Application, ContextTypes, CallbackQueryHandler, Comman
 
 from config import load_config, get_claude_credentials_path
 from core.notifier import Notifier
+from core.notification_settings import NotificationSettings
 from core.project_registry import ProjectRegistry
 from core.session_manager import SessionManager
 from core.cost_tracker import CostTracker
@@ -68,7 +69,8 @@ def main():
     auth_check = authorized(cfg.telegram_user_id)
 
     # Core components
-    notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id)
+    notification_settings = NotificationSettings()
+    notifier = Notifier(bot=bot_instance, chat_id=cfg.telegram_user_id, settings=notification_settings)
     registry = ProjectRegistry(data_file="data/projects.json")
 
     # Analytics
@@ -98,6 +100,7 @@ def main():
 
     # Store config in bot_data for handlers
     app.bot_data["config"] = cfg
+    app.bot_data["notification_settings"] = notification_settings
 
     # Register handlers
     # Main menu

@@ -116,11 +116,32 @@ sudo bash service/install-linux.sh
 ```
 
 **Windows (Task Scheduler):**
+
+Автоматически (PowerShell от администратора):
 ```powershell
-# Запустить от администратора
 .\service\install-windows.ps1
 ```
-Задача запускается при логоне текущего пользователя в интерактивной сессии — VS Code и другие GUI-приложения работают нормально.
+
+Или вручную через GUI:
+1. `Win+R` → `taskschd.msc` → **Создать задачу**
+2. **Общие**: имя `ClaudeDispatcher`, выбрать «Запускать только для зарегистрированного пользователя»
+3. **Триггеры**: Новый → **При входе в систему** → конкретный пользователь
+4. **Действия**: Новый →
+   - Программа: `E:\claude_dispatcher\venv\Scripts\pythonw.exe` (путь к pythonw в venv)
+   - Аргументы: `bot.py`
+   - Рабочая папка: `E:\claude_dispatcher`
+5. **Условия**: снять «Запускать только при питании от сети»
+6. **Параметры**: снять «Останавливать задачу, выполняемую дольше», включить «При сбое перезапускать через 1 мин» (до 3 раз)
+
+> **Важно:** используется `pythonw.exe` (не `python.exe`) — окно консоли не появляется. Задача должна работать в интерактивной сессии пользователя, чтобы IDE-интеграция (VS Code/Cursor) могла открывать окна.
+
+Управление из PowerShell:
+```powershell
+Start-ScheduledTask -TaskName ClaudeDispatcher      # запуск
+Stop-ScheduledTask -TaskName ClaudeDispatcher       # остановка
+Get-ScheduledTask -TaskName ClaudeDispatcher | Select State  # статус
+Unregister-ScheduledTask -TaskName ClaudeDispatcher  # удаление
+```
 
 ## IDE-интеграция
 

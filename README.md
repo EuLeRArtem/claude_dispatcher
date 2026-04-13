@@ -150,13 +150,8 @@ Unregister-ScheduledTask -TaskName ClaudeDispatcher  # удаление
 
 **Установка из .vsix (рекомендуется):**
 
-1. Собери пакет (если ещё не собран):
-   ```bash
-   cd vscode-extension
-   npm install && npm run compile && npm run package
-   ```
-2. В VS Code / Cursor: `Ctrl+Shift+P` → **Extensions: Install from VSIX...** → выбери `vscode-extension/claude-dispatcher-terminal-0.1.0.vsix`
-3. Перезагрузи IDE
+1. В VS Code / Cursor: `Ctrl+Shift+P` → **Extensions: Install from VSIX...** → выбери `vscode-extension/claude-dispatcher-terminal-0.1.0.vsix`
+2. Перезагрузи IDE
 
 **Или для разработки:**
 

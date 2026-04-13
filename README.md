@@ -22,7 +22,7 @@ Claude Code — CLI-инструмент, работающий в термина
 | Графики | [matplotlib](https://matplotlib.org/) + numpy |
 | Конфиг | `.env` (секреты) + `config.json` (настройки) |
 | IDE-интеграция | VS Code / Cursor extension (file-based IPC) |
-| Деплой | systemd (Linux) / NSSM (Windows) |
+| Автозапуск | systemd (Linux) / Task Scheduler (Windows) |
 
 ## Быстрый старт
 
@@ -108,18 +108,19 @@ python bot.py
 
 Открой бот в Telegram — `/start`.
 
-### 5. Установка как сервис (опционально)
+### 5. Автозапуск (опционально)
 
 **Linux (systemd):**
 ```bash
 sudo bash service/install-linux.sh
 ```
 
-**Windows (NSSM):**
+**Windows (Task Scheduler):**
 ```powershell
 # Запустить от администратора
 .\service\install-windows.ps1
 ```
+Задача запускается при логоне текущего пользователя в интерактивной сессии — VS Code и другие GUI-приложения работают нормально.
 
 ## IDE-интеграция
 

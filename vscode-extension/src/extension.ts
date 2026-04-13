@@ -28,10 +28,19 @@ let lastKillTimestamp = 0;
 const managedTerminals = new Map<string, vscode.Terminal>();
 
 export function activate(context: vscode.ExtensionContext) {
-	// Запоминаем время активации — игнорируем trigger-файлы старше этого момента
-	const activationTime = Date.now();
-	lastTimestamp = activationTime;
-	lastKillTimestamp = activationTime;
+	// Use last ACK timestamp as baseline (not Date.now()) so triggers written
+	// just before this window opened are still picked up.
+	try {
+		if (fs.existsSync(ACK_FILE)) {
+			lastTimestamp = parseInt(fs.readFileSync(ACK_FILE, 'utf-8').trim(), 10) || 0;
+		}
+	} catch { /* keep 0 */ }
+	try {
+		const killAckFile = path.join(TRIGGER_DIR, 'terminal-kill.ack');
+		if (fs.existsSync(killAckFile)) {
+			lastKillTimestamp = parseInt(fs.readFileSync(killAckFile, 'utf-8').trim(), 10) || 0;
+		}
+	} catch { /* keep 0 */ }
 
 	// Ensure trigger directory exists
 	if (!fs.existsSync(TRIGGER_DIR)) {
@@ -87,16 +96,6 @@ function writeReadyHeartbeat(): void {
 	}
 }
 
-function isMyWorkspace(cwd: string): boolean {
-	const folders = vscode.workspace.workspaceFolders;
-	if (!folders || folders.length === 0) {
-		return false;
-	}
-	const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
-	const target = normalize(cwd);
-	return folders.some(f => normalize(f.uri.fsPath) === target);
-}
-
 function handleTrigger(): void {
 	try {
 		const content = fs.readFileSync(TRIGGER_FILE, 'utf-8');
@@ -109,11 +108,6 @@ function handleTrigger(): void {
 		if (!request.command || !request.cwd) {
 			console.warn('Claude Dispatcher: invalid trigger — missing command or cwd');
 			lastTimestamp = request.timestamp;
-			return;
-		}
-
-		// Only handle triggers targeting this workspace
-		if (!isMyWorkspace(request.cwd)) {
 			return;
 		}
 

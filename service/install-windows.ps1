@@ -1,33 +1,58 @@
-# Install Claude Dispatcher as a Windows service using NSSM
+# Install Claude Dispatcher as a Windows Scheduled Task
 # Run as Administrator
 #
-# First install NSSM: winget install nssm  (or choco install nssm)
+# The task runs in the current user's session (not Session 0),
+# so GUI apps (VS Code, Cursor) can open windows normally.
 
-$ServiceName = "ClaudeDispatcher"
+$TaskName = "ClaudeDispatcher"
 $ProjectDir = Split-Path -Parent $PSScriptRoot
-$PythonExe = Join-Path $ProjectDir "venv\Scripts\python.exe"
+$PythonExe = Join-Path $ProjectDir "venv\Scripts\pythonw.exe"
 $BotScript = Join-Path $ProjectDir "bot.py"
 
-# Check NSSM
-if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
-    Write-Error "NSSM not found. Install: winget install nssm"
+if (-not (Test-Path $PythonExe)) {
+    Write-Error "Python venv not found at $PythonExe. Run: python -m venv venv && pip install -r requirements.txt"
     exit 1
 }
 
-# Install service
-nssm install $ServiceName $PythonExe $BotScript
-nssm set $ServiceName AppDirectory $ProjectDir
-nssm set $ServiceName DisplayName "Claude Dispatcher Bot"
-nssm set $ServiceName Description "Telegram bot for remote Claude Code session management"
-nssm set $ServiceName Start SERVICE_AUTO_START
-nssm set $ServiceName AppStdout (Join-Path $ProjectDir "logs\service-stdout.log")
-nssm set $ServiceName AppStderr (Join-Path $ProjectDir "logs\service-stderr.log")
-nssm set $ServiceName AppRotateFiles 1
-nssm set $ServiceName AppRotateBytes 5242880  # 5MB
+# Remove existing task if any
+Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
-# Start
-nssm start $ServiceName
-Write-Host "Service '$ServiceName' installed and started."
-Write-Host "  Stop:    nssm stop $ServiceName"
-Write-Host "  Remove:  nssm remove $ServiceName confirm"
-Write-Host "  Status:  nssm status $ServiceName"
+# Action: run bot.py via venv python
+$Action = New-ScheduledTaskAction `
+    -Execute $PythonExe `
+    -Argument $BotScript `
+    -WorkingDirectory $ProjectDir
+
+# Trigger: at user logon
+$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+
+# Settings: restart on failure, don't stop on idle, run indefinitely
+$Settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
+
+# Register task — runs as current user, interactive session (NOT "Run whether user is logged on or not")
+Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $Action `
+    -Trigger $Trigger `
+    -Settings $Settings `
+    -Description "Telegram bot for remote Claude Code session management" `
+    -RunLevel Limited
+
+Write-Host ""
+Write-Host "Task '$TaskName' registered successfully."
+Write-Host "  It will start automatically at logon."
+Write-Host ""
+Write-Host "Manual control:"
+Write-Host "  Start:   Start-ScheduledTask -TaskName $TaskName"
+Write-Host "  Stop:    Stop-ScheduledTask -TaskName $TaskName"
+Write-Host "  Remove:  Unregister-ScheduledTask -TaskName $TaskName"
+Write-Host "  Status:  Get-ScheduledTask -TaskName $TaskName | Select State"
+Write-Host ""
+Write-Host "Starting now..."
+Start-ScheduledTask -TaskName $TaskName
+Write-Host "Done. Check status: Get-ScheduledTask -TaskName $TaskName | Select State"
